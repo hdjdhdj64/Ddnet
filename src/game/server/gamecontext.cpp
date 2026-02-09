@@ -3814,19 +3814,22 @@ void CGameContext::ConAccessories(IConsole::IResult *pResult, void *pUserData)
 	pSelf->SendChatTarget(ClientId, "══════════════════════════");
 
 	char aBuf[128];
-	str_format(aBuf, sizeof(aBuf), "Rainbow Effect: %s %s",
-		pPlayer->m_HasRainbow ? "OWNED" : "Not owned",
-		pPlayer->m_RainbowEnabled ? "[ON]" : "[OFF]");
+	if(pPlayer->m_HasRainbow)
+		str_format(aBuf, sizeof(aBuf), "Rainbow Effect: OWNED %s", pPlayer->m_RainbowEnabled ? "[ON]" : "[OFF]");
+	else
+		str_copy(aBuf, "Rainbow Effect: Not owned");
 	pSelf->SendChatTarget(ClientId, aBuf);
 
-	str_format(aBuf, sizeof(aBuf), "Spawn Effect: %s %s",
-		pPlayer->m_HasSpawnEffect ? "OWNED" : "Not owned",
-		pPlayer->m_SpawnEffectEnabled ? "[ON]" : "[OFF]");
+	if(pPlayer->m_HasSpawnEffect)
+		str_format(aBuf, sizeof(aBuf), "Spawn Effect: OWNED %s", pPlayer->m_SpawnEffectEnabled ? "[ON]" : "[OFF]");
+	else
+		str_copy(aBuf, "Spawn Effect: Not owned");
 	pSelf->SendChatTarget(ClientId, aBuf);
 
-	str_format(aBuf, sizeof(aBuf), "Speed Boost: %s %s",
-		pPlayer->m_HasSpeedBoost ? "OWNED" : "Not owned",
-		pPlayer->m_SpeedBoostEnabled ? "[ON]" : "[OFF]");
+	if(pPlayer->m_HasSpeedBoost)
+		str_format(aBuf, sizeof(aBuf), "Speed Boost: OWNED %s", pPlayer->m_SpeedBoostEnabled ? "[ON]" : "[OFF]");
+	else
+		str_copy(aBuf, "Speed Boost: Not owned");
 	pSelf->SendChatTarget(ClientId, aBuf);
 
 	str_format(aBuf, sizeof(aBuf), "Infinite Jump: %s",
