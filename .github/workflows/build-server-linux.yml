@@ -1,0 +1,128 @@
+name: Build Server Linux
+
+on:
+  push:
+    branches-ignore:
+      - gh-readonly-queue/**
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+jobs:
+  build-server:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            arch: x86_64
+            cmake-args: -G Ninja
+            cmake-init-env: CXXFLAGS=-Werror
+            package-file: "*-linux_x86_64.tar.xz"
+
+          - name: linux-x86_64-ubuntu22
+            os: ubuntu-22.04
+            arch: x86_64
+            cmake-args: -G "Unix Makefiles"
+            cmake-init-env: CXXFLAGS=-Werror
+            package-file: "*-linux_x86_64.tar.xz"
+
+          - name: linux-aarch64
+            os: ubuntu-latest
+            arch: aarch64
+            cmake-args: -G Ninja -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/aarch64-linux-gnu.cmake
+            cmake-init-env: CXXFLAGS=-Werror
+            package-file: "*-linux_aarch64.tar.xz"
+            cross: true
+
+          - name: linux-armv7
+            os: ubuntu-latest
+            arch: armv7
+            cmake-args: -G Ninja -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/arm-linux-gnueabihf.cmake
+            cmake-init-env: CXXFLAGS=-Werror
+            package-file: "*-linux_armv7.tar.xz"
+            cross: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Prepare Linux
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            pkg-config \
+            ninja-build \
+            libsqlite3-dev \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            libfreetype6-dev
+
+      - name: Prepare cross-compilation (aarch64)
+        if: matrix.arch == 'aarch64'
+        run: |
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
+            libsqlite3-dev:arm64 \
+            || true
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update -y || true
+          sudo apt-get install -y \
+            crossbuild-essential-arm64 \
+            || true
+
+      - name: Prepare cross-compilation (armv7)
+        if: matrix.arch == 'armv7'
+        run: |
+          sudo apt-get install -y \
+            gcc-arm-linux-gnueabihf \
+            g++-arm-linux-gnueabihf \
+            || true
+          sudo dpkg --add-architecture armhf
+          sudo apt-get update -y || true
+          sudo apt-get install -y \
+            crossbuild-essential-armhf \
+            || true
+
+      - name: Build server in release mode
+        run: |
+          mkdir build
+          cd build
+          ${{ matrix.cmake-init-env && format('cmake -E env {0}', matrix.cmake-init-env) || '' }} \
+            cmake ${{ matrix.cmake-args }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSERVER=ON \
+            -DCLIENT=OFF \
+            -DTOOLS=OFF \
+            -DVIDEORECORDER=OFF \
+            -DVULKAN=OFF \
+            -Werror=dev \
+            ..
+          cmake --build . --config Release -j$(nproc)
+
+      - name: Test server startup
+        if: ${{ !matrix.cross }}
+        run: |
+          cd build
+          ./DDNet-Server shutdown
+
+      - name: Package server
+        run: |
+          cd build
+          mkdir -p artifacts
+          tar -cJf artifacts/ddnet-server-${{ matrix.arch }}.tar.xz \
+            DDNet-Server \
+            || tar -cJf artifacts/ddnet-server-${{ matrix.arch }}.tar.xz \
+            DDNet-Server* \
+            || echo "Packaging individual files"
+          ls -la artifacts/
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddnet-server-${{ matrix.name }}
+          path: build/artifacts/

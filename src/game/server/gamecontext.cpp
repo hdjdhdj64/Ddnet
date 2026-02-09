@@ -1699,6 +1699,22 @@ void CGameContext::OnClientEnter(int ClientId)
 
 			m_apPlayers[ClientId]->m_ShowOthers = g_Config.m_SvShowOthersDefault;
 		}
+
+		// Enhanced join notification with player count
+		if(g_Config.m_SvPlayerJoinNotifications)
+		{
+			int NumPlayers = 0;
+			for(int i = 0; i < Server()->MaxClients(); i++)
+			{
+				if(m_apPlayers[i])
+					NumPlayers++;
+			}
+
+			char aJoinBuf[256];
+			str_format(aJoinBuf, sizeof(aJoinBuf), "★ '%s' joined the server [%d/%d]",
+				Server()->ClientName(ClientId), NumPlayers, Server()->MaxClients());
+			SendChat(-1, TEAM_ALL, aJoinBuf);
+		}
 	}
 	m_VoteUpdate = true;
 
@@ -1856,6 +1872,10 @@ void CGameContext::OnClientDrop(int ClientId, const char *pReason)
 {
 	LogEvent("Disconnect", ClientId);
 
+	// Save name for leave notification before player is deleted
+	char aClientName[MAX_NAME_LENGTH];
+	str_copy(aClientName, Server()->ClientName(ClientId), sizeof(aClientName));
+
 	AbortVoteKickOnDisconnect(ClientId);
 	m_pController->OnPlayerDisconnect(m_apPlayers[ClientId], pReason);
 	delete m_apPlayers[ClientId];
@@ -1890,6 +1910,26 @@ void CGameContext::OnClientDrop(int ClientId, const char *pReason)
 	{
 		if(pPlayer && pPlayer->m_LastWhisperTo == ClientId)
 			pPlayer->m_LastWhisperTo = -1;
+	}
+
+	// Enhanced leave notification with player count
+	if(g_Config.m_SvPlayerJoinNotifications)
+	{
+		int NumPlayers = 0;
+		for(int i = 0; i < Server()->MaxClients(); i++)
+		{
+			if(m_apPlayers[i])
+				NumPlayers++;
+		}
+
+		char aLeaveBuf[256];
+		if(pReason[0])
+			str_format(aLeaveBuf, sizeof(aLeaveBuf), "☆ '%s' left the server (%s) [%d/%d]",
+				aClientName, pReason, NumPlayers, Server()->MaxClients());
+		else
+			str_format(aLeaveBuf, sizeof(aLeaveBuf), "☆ '%s' left the server [%d/%d]",
+				aClientName, NumPlayers, Server()->MaxClients());
+		SendChat(-1, TEAM_ALL, aLeaveBuf);
 	}
 
 	protocol7::CNetMsg_Sv_ClientDrop Msg;
@@ -3386,6 +3426,162 @@ void CGameContext::ConBroadcast(IConsole::IResult *pResult, void *pUserData)
 	pSelf->SendBroadcast(aBuf, -1);
 }
 
+void CGameContext::ConServerAnnouncement(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	char aBuf[1024];
+	str_copy(aBuf, pResult->GetString(0), sizeof(aBuf));
+	UnescapeNewlines(aBuf);
+
+	char aDecoratedBuf[1024];
+	str_format(aDecoratedBuf, sizeof(aDecoratedBuf),
+		"════════════════════\n"
+		"★ ANNOUNCEMENT ★\n"
+		"%s\n"
+		"════════════════════",
+		aBuf);
+
+	pSelf->SendBroadcast(aDecoratedBuf, -1);
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+}
+
+void CGameContext::ConWarnPlayer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("warn_player", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	const char *pReason = pResult->NumArguments() > 1 ? pResult->GetString(1) : "No reason given";
+
+	char aBuf[512];
+	str_format(aBuf, sizeof(aBuf),
+		"════════════════════\n"
+		"⚠ WARNING ⚠\n"
+		"%s\n"
+		"════════════════════",
+		pReason);
+	pSelf->SendBroadcast(aBuf, Victim);
+
+	char aChatBuf[256];
+	str_format(aChatBuf, sizeof(aChatBuf), "⚠ Warning: %s", pReason);
+	pSelf->SendChatTarget(Victim, aChatBuf);
+
+	log_info("warn_player", "Player '%s' (ID %d) was warned: %s",
+		pSelf->Server()->ClientName(Victim), Victim, pReason);
+}
+
+void CGameContext::ConPlayerStats(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("player_stats", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[Victim];
+
+	const char *pAddrStr = pSelf->Server()->ClientAddrString(Victim, false);
+
+	int Seconds = (pSelf->Server()->Tick() - pPlayer->m_JoinTick) / pSelf->Server()->TickSpeed();
+	int Minutes = Seconds / 60;
+	Seconds %= 60;
+
+	char aBuf[512];
+	str_format(aBuf, sizeof(aBuf),
+		"═══ Player Stats ═══\n"
+		"Name: %s\n"
+		"ID: %d\n"
+		"IP: %s\n"
+		"Team: %s\n"
+		"Online: %dm %ds\n"
+		"════════════════════",
+		pSelf->Server()->ClientName(Victim),
+		Victim,
+		pAddrStr,
+		pPlayer->GetTeam() == TEAM_SPECTATORS ? "Spectator" : "Playing",
+		Minutes, Seconds);
+
+	log_info("player_stats", "%s", aBuf);
+}
+
+void CGameContext::ConForceSpectate(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("force_spectate", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	pSelf->m_apPlayers[Victim]->SetTeam(TEAM_SPECTATORS, false);
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "'%s' was moved to spectators by an admin.",
+		pSelf->Server()->ClientName(Victim));
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+
+	pSelf->SendChatTarget(Victim, "You have been moved to spectators by an admin.");
+}
+
+void CGameContext::ConServerStatus(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int NumPlayers = 0;
+	int NumSpectators = 0;
+	for(int i = 0; i < pSelf->Server()->MaxClients(); i++)
+	{
+		if(pSelf->m_apPlayers[i])
+		{
+			if(pSelf->m_apPlayers[i]->GetTeam() == TEAM_SPECTATORS)
+				NumSpectators++;
+			else
+				NumPlayers++;
+		}
+	}
+
+	int Uptime = (pSelf->Server()->Tick()) / pSelf->Server()->TickSpeed();
+	int UptimeHours = Uptime / 3600;
+	int UptimeMinutes = (Uptime % 3600) / 60;
+
+	char aBuf[512];
+	str_format(aBuf, sizeof(aBuf),
+		"═══ Server Status ═══\n"
+		"Map: %s\n"
+		"Players: %d/%d\n"
+		"Spectators: %d\n"
+		"Uptime: %dh %dm\n"
+		"═════════════════════",
+		pSelf->Server()->GetMapName(),
+		NumPlayers, pSelf->Server()->MaxClients(),
+		NumSpectators,
+		UptimeHours, UptimeMinutes);
+
+	log_info("server_status", "%s", aBuf);
+}
+
+void CGameContext::SendDecoratedBroadcast(const char *pText, int ClientId)
+{
+	char aDecoratedBuf[1024];
+	str_format(aDecoratedBuf, sizeof(aDecoratedBuf),
+		"════════════════════\n"
+		"%s\n"
+		"════════════════════",
+		pText);
+	SendBroadcast(aDecoratedBuf, ClientId);
+}
+
 void CGameContext::ConSay(IConsole::IResult *pResult, void *pUserData)
 {
 	CGameContext *pSelf = (CGameContext *)pUserData;
@@ -3912,6 +4108,13 @@ void CGameContext::OnConsoleInit()
 	Console()->Register("votes", "?i[page]", CFGFLAG_SERVER, ConVotes, this, "Show all votes (page 0 by default, 20 entries per page)");
 	Console()->Register("dump_antibot", "", CFGFLAG_SERVER | CFGFLAG_STORE, ConDumpAntibot, this, "Dumps the antibot status");
 	Console()->Register("antibot", "r[command]", CFGFLAG_SERVER | CFGFLAG_STORE, ConAntibot, this, "Sends a command to the antibot");
+
+	// Enhanced admin commands
+	Console()->Register("server_announcement", "r[message]", CFGFLAG_SERVER, ConServerAnnouncement, this, "Send a decorated announcement to all players (broadcast + chat)");
+	Console()->Register("warn_player", "v[id] ?r[reason]", CFGFLAG_SERVER, ConWarnPlayer, this, "Send a warning message to a specific player");
+	Console()->Register("player_stats", "v[id]", CFGFLAG_SERVER, ConPlayerStats, this, "Show detailed stats for a player");
+	Console()->Register("force_spectate", "v[id]", CFGFLAG_SERVER, ConForceSpectate, this, "Force a player into spectator mode");
+	Console()->Register("server_status", "", CFGFLAG_SERVER, ConServerStatus, this, "Show current server status (players, uptime, map)");
 
 	Console()->Chain("sv_motd", ConchainSpecialMotdupdate, this);
 

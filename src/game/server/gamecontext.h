@@ -167,6 +167,14 @@ class CGameContext : public IGameServer
 	static void ConDrySave(IConsole::IResult *pResult, void *pUserData);
 	static void ConDumpAntibot(IConsole::IResult *pResult, void *pUserData);
 	static void ConAntibot(IConsole::IResult *pResult, void *pUserData);
+
+	// Enhanced admin commands
+	static void ConServerAnnouncement(IConsole::IResult *pResult, void *pUserData);
+	static void ConWarnPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConPlayerStats(IConsole::IResult *pResult, void *pUserData);
+	static void ConForceSpectate(IConsole::IResult *pResult, void *pUserData);
+	static void ConServerStatus(IConsole::IResult *pResult, void *pUserData);
+
 	static void ConchainSpecialMotdupdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainSettingUpdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainPracticeByDefaultUpdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
@@ -305,6 +313,7 @@ public:
 	void SendServerAlert(const char *pMessage);
 	void SendModeratorAlert(const char *pMessage, int ToClientId);
 	void SendBroadcast(const char *pText, int ClientId, bool IsImportant = true);
+	void SendDecoratedBroadcast(const char *pText, int ClientId);
 	void SendSkinChange7(int ClientId);
 
 	void List(int ClientId, const char *pFilter);
