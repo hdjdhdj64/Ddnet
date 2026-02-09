@@ -149,6 +149,30 @@ void CPlayer::Reset()
 	m_RescueMode = RESCUEMODE_AUTO;
 
 	m_CameraInfo.Reset();
+
+	// Shop & Accessories
+	m_ShopCoins = 100;
+	m_HasRainbow = false;
+	m_HasSpawnEffect = false;
+	m_HasSpeedBoost = false;
+	m_HasInfiniteJumpAccess = false;
+	m_HasProtectiveAura = false;
+	m_HasEndlessHook = false;
+	m_HasSuperTee = false;
+	m_HasCustomEmote = false;
+	m_HasGravityControl = false;
+	m_HasGrenadeLauncher = false;
+	m_HasLaserGun = false;
+	m_HasInvincibility = false;
+	m_RainbowEnabled = false;
+	m_SpawnEffectEnabled = false;
+	m_SpeedBoostEnabled = false;
+	m_EndlessHookEnabled = false;
+	m_SuperTeeEnabled = false;
+	m_CustomEmoteEnabled = false;
+	m_GravityControlEnabled = false;
+	m_InvincibilityEnabled = false;
+	m_RainbowColor = 0;
 }
 
 static int PlayerFlags_SixToSeven(int Flags)

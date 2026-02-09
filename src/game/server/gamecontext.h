@@ -167,6 +167,35 @@ class CGameContext : public IGameServer
 	static void ConDrySave(IConsole::IResult *pResult, void *pUserData);
 	static void ConDumpAntibot(IConsole::IResult *pResult, void *pUserData);
 	static void ConAntibot(IConsole::IResult *pResult, void *pUserData);
+
+	// Enhanced admin commands
+	static void ConServerAnnouncement(IConsole::IResult *pResult, void *pUserData);
+	static void ConWarnPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConPlayerStats(IConsole::IResult *pResult, void *pUserData);
+	static void ConForceSpectate(IConsole::IResult *pResult, void *pUserData);
+	static void ConServerStatus(IConsole::IResult *pResult, void *pUserData);
+	static void ConExecOnPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConFreezeAll(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnFreezeAll(IConsole::IResult *pResult, void *pUserData);
+	static void ConBroadcastPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConGiveCoins(IConsole::IResult *pResult, void *pUserData);
+	static void ConSetCoins(IConsole::IResult *pResult, void *pUserData);
+	static void ConKillAll(IConsole::IResult *pResult, void *pUserData);
+	static void ConSuperAll(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnSuperAll(IConsole::IResult *pResult, void *pUserData);
+	static void ConTeleportPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConSlapPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConHealPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConSwapPlayers(IConsole::IResult *pResult, void *pUserData);
+
+	// Chat shop & accessory commands
+	static void ConShop(IConsole::IResult *pResult, void *pUserData);
+	static void ConBuy(IConsole::IResult *pResult, void *pUserData);
+	static void ConAccessories(IConsole::IResult *pResult, void *pUserData);
+	static void ConEffects(IConsole::IResult *pResult, void *pUserData);
+	static void ConCoins(IConsole::IResult *pResult, void *pUserData);
+	static void ConGift(IConsole::IResult *pResult, void *pUserData);
+
 	static void ConchainSpecialMotdupdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainSettingUpdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainPracticeByDefaultUpdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
@@ -305,6 +334,7 @@ public:
 	void SendServerAlert(const char *pMessage);
 	void SendModeratorAlert(const char *pMessage, int ToClientId);
 	void SendBroadcast(const char *pText, int ClientId, bool IsImportant = true);
+	void SendDecoratedBroadcast(const char *pText, int ClientId);
 	void SendSkinChange7(int ClientId);
 
 	void List(int ClientId, const char *pFilter);

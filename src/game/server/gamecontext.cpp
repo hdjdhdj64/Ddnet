@@ -1699,6 +1699,22 @@ void CGameContext::OnClientEnter(int ClientId)
 
 			m_apPlayers[ClientId]->m_ShowOthers = g_Config.m_SvShowOthersDefault;
 		}
+
+		// Enhanced join notification with player count
+		if(g_Config.m_SvPlayerJoinNotifications)
+		{
+			int NumPlayers = 0;
+			for(int i = 0; i < Server()->MaxClients(); i++)
+			{
+				if(m_apPlayers[i])
+					NumPlayers++;
+			}
+
+			char aJoinBuf[256];
+			str_format(aJoinBuf, sizeof(aJoinBuf), "★ '%s' joined the server [%d/%d]",
+				Server()->ClientName(ClientId), NumPlayers, Server()->MaxClients());
+			SendChat(-1, TEAM_ALL, aJoinBuf);
+		}
 	}
 	m_VoteUpdate = true;
 
@@ -1856,6 +1872,10 @@ void CGameContext::OnClientDrop(int ClientId, const char *pReason)
 {
 	LogEvent("Disconnect", ClientId);
 
+	// Save name for leave notification before player is deleted
+	char aClientName[MAX_NAME_LENGTH];
+	str_copy(aClientName, Server()->ClientName(ClientId), sizeof(aClientName));
+
 	AbortVoteKickOnDisconnect(ClientId);
 	m_pController->OnPlayerDisconnect(m_apPlayers[ClientId], pReason);
 	delete m_apPlayers[ClientId];
@@ -1890,6 +1910,26 @@ void CGameContext::OnClientDrop(int ClientId, const char *pReason)
 	{
 		if(pPlayer && pPlayer->m_LastWhisperTo == ClientId)
 			pPlayer->m_LastWhisperTo = -1;
+	}
+
+	// Enhanced leave notification with player count
+	if(g_Config.m_SvPlayerJoinNotifications)
+	{
+		int NumPlayers = 0;
+		for(int i = 0; i < Server()->MaxClients(); i++)
+		{
+			if(m_apPlayers[i])
+				NumPlayers++;
+		}
+
+		char aLeaveBuf[256];
+		if(pReason[0])
+			str_format(aLeaveBuf, sizeof(aLeaveBuf), "☆ '%s' left the server (%s) [%d/%d]",
+				aClientName, pReason, NumPlayers, Server()->MaxClients());
+		else
+			str_format(aLeaveBuf, sizeof(aLeaveBuf), "☆ '%s' left the server [%d/%d]",
+				aClientName, NumPlayers, Server()->MaxClients());
+		SendChat(-1, TEAM_ALL, aLeaveBuf);
 	}
 
 	protocol7::CNetMsg_Sv_ClientDrop Msg;
@@ -3386,6 +3426,1061 @@ void CGameContext::ConBroadcast(IConsole::IResult *pResult, void *pUserData)
 	pSelf->SendBroadcast(aBuf, -1);
 }
 
+void CGameContext::ConServerAnnouncement(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	char aBuf[1024];
+	str_copy(aBuf, pResult->GetString(0), sizeof(aBuf));
+	UnescapeNewlines(aBuf);
+
+	char aDecoratedBuf[1024];
+	str_format(aDecoratedBuf, sizeof(aDecoratedBuf),
+		"════════════════════\n"
+		"★ ANNOUNCEMENT ★\n"
+		"%s\n"
+		"════════════════════",
+		aBuf);
+
+	pSelf->SendBroadcast(aDecoratedBuf, -1);
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+}
+
+void CGameContext::ConWarnPlayer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("warn_player", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	const char *pReason = pResult->NumArguments() > 1 ? pResult->GetString(1) : "No reason given";
+
+	char aBuf[512];
+	str_format(aBuf, sizeof(aBuf),
+		"════════════════════\n"
+		"⚠ WARNING ⚠\n"
+		"%s\n"
+		"════════════════════",
+		pReason);
+	pSelf->SendBroadcast(aBuf, Victim);
+
+	char aChatBuf[256];
+	str_format(aChatBuf, sizeof(aChatBuf), "⚠ Warning: %s", pReason);
+	pSelf->SendChatTarget(Victim, aChatBuf);
+
+	log_info("warn_player", "Player '%s' (ID %d) was warned: %s",
+		pSelf->Server()->ClientName(Victim), Victim, pReason);
+}
+
+void CGameContext::ConPlayerStats(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("player_stats", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[Victim];
+
+	const char *pAddrStr = pSelf->Server()->ClientAddrString(Victim, false);
+
+	int Seconds = (pSelf->Server()->Tick() - pPlayer->m_JoinTick) / pSelf->Server()->TickSpeed();
+	int Minutes = Seconds / 60;
+	Seconds %= 60;
+
+	char aBuf[512];
+	str_format(aBuf, sizeof(aBuf),
+		"═══ Player Stats ═══\n"
+		"Name: %s\n"
+		"ID: %d\n"
+		"IP: %s\n"
+		"Team: %s\n"
+		"Online: %dm %ds\n"
+		"════════════════════",
+		pSelf->Server()->ClientName(Victim),
+		Victim,
+		pAddrStr,
+		pPlayer->GetTeam() == TEAM_SPECTATORS ? "Spectator" : "Playing",
+		Minutes, Seconds);
+
+	log_info("player_stats", "%s", aBuf);
+}
+
+void CGameContext::ConForceSpectate(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("force_spectate", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	pSelf->m_apPlayers[Victim]->SetTeam(TEAM_SPECTATORS, false);
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "'%s' was moved to spectators by an admin.",
+		pSelf->Server()->ClientName(Victim));
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+
+	pSelf->SendChatTarget(Victim, "You have been moved to spectators by an admin.");
+}
+
+void CGameContext::ConServerStatus(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int NumPlayers = 0;
+	int NumSpectators = 0;
+	for(int i = 0; i < pSelf->Server()->MaxClients(); i++)
+	{
+		if(pSelf->m_apPlayers[i])
+		{
+			if(pSelf->m_apPlayers[i]->GetTeam() == TEAM_SPECTATORS)
+				NumSpectators++;
+			else
+				NumPlayers++;
+		}
+	}
+
+	int Uptime = (pSelf->Server()->Tick()) / pSelf->Server()->TickSpeed();
+	int UptimeHours = Uptime / 3600;
+	int UptimeMinutes = (Uptime % 3600) / 60;
+
+	char aBuf[512];
+	str_format(aBuf, sizeof(aBuf),
+		"═══ Server Status ═══\n"
+		"Map: %s\n"
+		"Players: %d/%d\n"
+		"Spectators: %d\n"
+		"Uptime: %dh %dm\n"
+		"═════════════════════",
+		pSelf->Server()->GetMapName(),
+		NumPlayers, pSelf->Server()->MaxClients(),
+		NumSpectators,
+		UptimeHours, UptimeMinutes);
+
+	log_info("server_status", "%s", aBuf);
+}
+
+void CGameContext::ConExecOnPlayer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("exec_on_player", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	const char *pCommand = pResult->GetString(1);
+	if(!pCommand || pCommand[0] == '\0')
+	{
+		log_info("exec_on_player", "No command specified");
+		return;
+	}
+
+	// Execute the command as the target player using CFGFLAG_CHAT context
+	// The admin's permissions were already checked when this RCON command was dispatched
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "Admin executing '/%s' on behalf of '%s' (ID %d)",
+		pCommand, pSelf->Server()->ClientName(Victim), Victim);
+	log_info("exec_on_player", "%s", aBuf);
+
+	pSelf->Console()->SetFlagMask(CFGFLAG_CHAT);
+	pSelf->Console()->ExecuteLine(pCommand, Victim, false);
+	pSelf->Console()->SetFlagMask(CFGFLAG_SERVER);
+}
+
+void CGameContext::ConFreezeAll(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Count = 0;
+	for(int i = 0; i < pSelf->Server()->MaxClients(); i++)
+	{
+		CCharacter *pChr = pSelf->GetPlayerChar(i);
+		if(pChr)
+		{
+			pChr->Freeze();
+			Count++;
+		}
+	}
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "★ Admin froze all players (%d players affected)", Count);
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+}
+
+void CGameContext::ConUnFreezeAll(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Count = 0;
+	for(int i = 0; i < pSelf->Server()->MaxClients(); i++)
+	{
+		CCharacter *pChr = pSelf->GetPlayerChar(i);
+		if(pChr)
+		{
+			pChr->UnFreeze();
+			Count++;
+		}
+	}
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "★ Admin unfroze all players (%d players affected)", Count);
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+}
+
+void CGameContext::ConBroadcastPlayer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("broadcast_player", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	const char *pMessage = pResult->GetString(1);
+	pSelf->SendBroadcast(pMessage, Victim);
+}
+
+void CGameContext::ConGiveCoins(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("give_coins", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	int Amount = pResult->GetInteger(1);
+	if(Amount <= 0)
+	{
+		log_info("give_coins", "Amount must be positive");
+		return;
+	}
+
+	pSelf->m_apPlayers[Victim]->m_ShopCoins += Amount;
+
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "★ You received %d coins from an admin! Balance: %d",
+		Amount, pSelf->m_apPlayers[Victim]->m_ShopCoins);
+	pSelf->SendChatTarget(Victim, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Gave %d coins to '%s' (ID %d). New balance: %d",
+		Amount, pSelf->Server()->ClientName(Victim), Victim, pSelf->m_apPlayers[Victim]->m_ShopCoins);
+	log_info("give_coins", "%s", aBuf);
+}
+
+void CGameContext::ConSetCoins(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("set_coins", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	int Amount = pResult->GetInteger(1);
+	if(Amount < 0)
+	{
+		log_info("set_coins", "Amount cannot be negative");
+		return;
+	}
+
+	pSelf->m_apPlayers[Victim]->m_ShopCoins = Amount;
+
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "★ Your coin balance was set to %d by an admin.", Amount);
+	pSelf->SendChatTarget(Victim, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Set coins for '%s' (ID %d) to %d",
+		pSelf->Server()->ClientName(Victim), Victim, Amount);
+	log_info("set_coins", "%s", aBuf);
+}
+
+void CGameContext::ConKillAll(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Count = 0;
+	for(int i = 0; i < pSelf->Server()->MaxClients(); i++)
+	{
+		if(pSelf->m_apPlayers[i])
+		{
+			CCharacter *pChr = pSelf->GetPlayerChar(i);
+			if(pChr)
+			{
+				pSelf->m_apPlayers[i]->KillCharacter(WEAPON_GAME);
+				Count++;
+			}
+		}
+	}
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "★ Admin killed all players (%d players affected)", Count);
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+}
+
+void CGameContext::ConSuperAll(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Count = 0;
+	for(int i = 0; i < pSelf->Server()->MaxClients(); i++)
+	{
+		CCharacter *pChr = pSelf->GetPlayerChar(i);
+		if(pChr)
+		{
+			pChr->SetSuper(true);
+			Count++;
+		}
+	}
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "★ Admin made all players super (%d players affected)", Count);
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+}
+
+void CGameContext::ConUnSuperAll(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Count = 0;
+	for(int i = 0; i < pSelf->Server()->MaxClients(); i++)
+	{
+		CCharacter *pChr = pSelf->GetPlayerChar(i);
+		if(pChr)
+		{
+			pChr->SetSuper(false);
+			Count++;
+		}
+	}
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "★ Admin removed super from all players (%d players affected)", Count);
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+}
+
+void CGameContext::ConTeleportPlayer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	int Target = pResult->GetInteger(1);
+
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("teleport_player", "Source client ID not found: %d", Victim);
+		return;
+	}
+	if(!CheckClientId(Target) || !pSelf->m_apPlayers[Target])
+	{
+		log_info("teleport_player", "Target client ID not found: %d", Target);
+		return;
+	}
+
+	CCharacter *pVictimChr = pSelf->GetPlayerChar(Victim);
+	CCharacter *pTargetChr = pSelf->GetPlayerChar(Target);
+	if(!pVictimChr || !pTargetChr)
+	{
+		log_info("teleport_player", "One or both players are not alive");
+		return;
+	}
+
+	pVictimChr->SetPosition(pTargetChr->GetPos());
+	pVictimChr->ResetVelocity();
+
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "★ You were teleported to '%s' by an admin.",
+		pSelf->Server()->ClientName(Target));
+	pSelf->SendChatTarget(Victim, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Teleported '%s' to '%s'",
+		pSelf->Server()->ClientName(Victim), pSelf->Server()->ClientName(Target));
+	log_info("teleport_player", "%s", aBuf);
+}
+
+void CGameContext::ConSlapPlayer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("slap_player", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	CCharacter *pChr = pSelf->GetPlayerChar(Victim);
+	if(!pChr)
+	{
+		log_info("slap_player", "Player is not alive");
+		return;
+	}
+
+	int Power = pResult->NumArguments() > 1 ? pResult->GetInteger(1) : 10;
+
+	pChr->SetVelocity(vec2(0, -Power));
+
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "★ '%s' was slapped by an admin!",
+		pSelf->Server()->ClientName(Victim));
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+
+	pSelf->CreateSound(pChr->GetPos(), SOUND_PLAYER_PAIN_SHORT);
+}
+
+void CGameContext::ConHealPlayer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("heal_player", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	CCharacter *pChr = pSelf->GetPlayerChar(Victim);
+	if(!pChr)
+	{
+		log_info("heal_player", "Player is not alive");
+		return;
+	}
+
+	pChr->UnFreeze();
+	pChr->SetDeepFrozen(false);
+
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "★ '%s' was healed by an admin.",
+		pSelf->Server()->ClientName(Victim));
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+
+	pSelf->SendChatTarget(Victim, "★ You have been healed by an admin!");
+	pSelf->CreatePlayerSpawn(pChr->GetPos());
+}
+
+void CGameContext::ConSwapPlayers(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Player1 = pResult->GetVictim();
+	int Player2 = pResult->GetInteger(1);
+
+	if(!CheckClientId(Player1) || !pSelf->m_apPlayers[Player1])
+	{
+		log_info("swap_players", "Player 1 ID not found: %d", Player1);
+		return;
+	}
+	if(!CheckClientId(Player2) || !pSelf->m_apPlayers[Player2])
+	{
+		log_info("swap_players", "Player 2 ID not found: %d", Player2);
+		return;
+	}
+
+	CCharacter *pChr1 = pSelf->GetPlayerChar(Player1);
+	CCharacter *pChr2 = pSelf->GetPlayerChar(Player2);
+	if(!pChr1 || !pChr2)
+	{
+		log_info("swap_players", "One or both players are not alive");
+		return;
+	}
+
+	vec2 Pos1 = pChr1->GetPos();
+	vec2 Pos2 = pChr2->GetPos();
+
+	pChr1->SetPosition(Pos2);
+	pChr1->ResetVelocity();
+	pChr2->SetPosition(Pos1);
+	pChr2->ResetVelocity();
+
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "★ Admin swapped '%s' and '%s'!",
+		pSelf->Server()->ClientName(Player1), pSelf->Server()->ClientName(Player2));
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+}
+
+void CGameContext::ConGift(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	if(pResult->NumArguments() < 2)
+	{
+		pSelf->SendChatTarget(ClientId, "Usage: /gift <player name> <amount>");
+		return;
+	}
+
+	const char *pTargetName = pResult->GetString(0);
+	int Amount = pResult->GetInteger(1);
+
+	if(Amount <= 0)
+	{
+		pSelf->SendChatTarget(ClientId, "⚠ Amount must be positive!");
+		return;
+	}
+	if(Amount > pPlayer->m_ShopCoins)
+	{
+		pSelf->SendChatTarget(ClientId, "⚠ Not enough coins!");
+		return;
+	}
+
+	// Find target player by name
+	int TargetId = -1;
+	for(int i = 0; i < pSelf->Server()->MaxClients(); i++)
+	{
+		if(i != ClientId && pSelf->m_apPlayers[i] && str_comp_nocase(pSelf->Server()->ClientName(i), pTargetName) == 0)
+		{
+			TargetId = i;
+			break;
+		}
+	}
+
+	if(TargetId == -1)
+	{
+		pSelf->SendChatTarget(ClientId, "⚠ Player not found!");
+		return;
+	}
+
+	pPlayer->m_ShopCoins -= Amount;
+	pSelf->m_apPlayers[TargetId]->m_ShopCoins += Amount;
+
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "★ You gifted %d coins to '%s'. Your balance: %d",
+		Amount, pSelf->Server()->ClientName(TargetId), pPlayer->m_ShopCoins);
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "★ '%s' gifted you %d coins! Your balance: %d",
+		pSelf->Server()->ClientName(ClientId), Amount, pSelf->m_apPlayers[TargetId]->m_ShopCoins);
+	pSelf->SendChatTarget(TargetId, aBuf);
+}
+
+void CGameContext::ConShop(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+	pSelf->SendChatTarget(ClientId, "★ SHOP ★");
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+	pSelf->SendChatTarget(ClientId, " ");
+	pSelf->SendChatTarget(ClientId, "1. Rainbow Effect - 50 coins");
+	pSelf->SendChatTarget(ClientId, "   Color-cycling name effect");
+	pSelf->SendChatTarget(ClientId, "2. Spawn Effect - 30 coins");
+	pSelf->SendChatTarget(ClientId, "   Special spawn animation");
+	pSelf->SendChatTarget(ClientId, "3. Speed Boost - 40 coins");
+	pSelf->SendChatTarget(ClientId, "   Temporary speed increase");
+	pSelf->SendChatTarget(ClientId, "4. Infinite Jump - 60 coins");
+	pSelf->SendChatTarget(ClientId, "   Unlimited jumps");
+	pSelf->SendChatTarget(ClientId, "5. Protective Aura - 45 coins");
+	pSelf->SendChatTarget(ClientId, "   Freeze protection");
+	pSelf->SendChatTarget(ClientId, "6. Endless Hook - 35 coins");
+	pSelf->SendChatTarget(ClientId, "   Hook never releases");
+	pSelf->SendChatTarget(ClientId, "7. Super Tee - 70 coins");
+	pSelf->SendChatTarget(ClientId, "   Become super powerful");
+	pSelf->SendChatTarget(ClientId, "8. Custom Emote - 25 coins");
+	pSelf->SendChatTarget(ClientId, "   Angry emote effect");
+	pSelf->SendChatTarget(ClientId, "9. Gravity Control - 55 coins");
+	pSelf->SendChatTarget(ClientId, "   Low gravity toggle");
+	pSelf->SendChatTarget(ClientId, "10. Grenade Launcher - 20 coins");
+	pSelf->SendChatTarget(ClientId, "    Get a grenade launcher");
+	pSelf->SendChatTarget(ClientId, "11. Laser Gun - 20 coins");
+	pSelf->SendChatTarget(ClientId, "    Get a laser rifle");
+	pSelf->SendChatTarget(ClientId, "12. Invincibility - 80 coins");
+	pSelf->SendChatTarget(ClientId, "    Become invincible");
+	pSelf->SendChatTarget(ClientId, " ");
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "Your coins: %d", pPlayer->m_ShopCoins);
+	pSelf->SendChatTarget(ClientId, aBuf);
+	pSelf->SendChatTarget(ClientId, "Use /buy <number> to purchase");
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+}
+
+void CGameContext::ConBuy(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	int ItemId = pResult->GetInteger(0);
+
+	switch(ItemId)
+	{
+	case 1: // Rainbow Effect
+		if(pPlayer->m_HasRainbow)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own the Rainbow Effect!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 50)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 50 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 50;
+		pPlayer->m_HasRainbow = true;
+		pPlayer->m_RainbowEnabled = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Rainbow Effect! Use /effects to toggle.");
+		break;
+
+	case 2: // Spawn Effect
+		if(pPlayer->m_HasSpawnEffect)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own the Spawn Effect!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 30)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 30 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 30;
+		pPlayer->m_HasSpawnEffect = true;
+		pPlayer->m_SpawnEffectEnabled = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Spawn Effect! Use /effects to toggle.");
+		break;
+
+	case 3: // Speed Boost
+		if(pPlayer->m_HasSpeedBoost)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own the Speed Boost!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 40)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 40 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 40;
+		pPlayer->m_HasSpeedBoost = true;
+		pPlayer->m_SpeedBoostEnabled = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Speed Boost! Use /effects to toggle.");
+		break;
+
+	case 4: // Infinite Jump
+		if(pPlayer->m_HasInfiniteJumpAccess)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own Infinite Jump!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 60)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 60 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 60;
+		pPlayer->m_HasInfiniteJumpAccess = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Infinite Jump!");
+		break;
+
+	case 5: // Protective Aura
+		if(pPlayer->m_HasProtectiveAura)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own Protective Aura!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 45)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 45 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 45;
+		pPlayer->m_HasProtectiveAura = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Protective Aura!");
+		break;
+
+	case 6: // Endless Hook
+		if(pPlayer->m_HasEndlessHook)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own Endless Hook!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 35)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 35 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 35;
+		pPlayer->m_HasEndlessHook = true;
+		pPlayer->m_EndlessHookEnabled = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Endless Hook! Use /effects to toggle.");
+		break;
+
+	case 7: // Super Tee
+		if(pPlayer->m_HasSuperTee)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own Super Tee!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 70)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 70 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 70;
+		pPlayer->m_HasSuperTee = true;
+		pPlayer->m_SuperTeeEnabled = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Super Tee! Use /effects to toggle.");
+		break;
+
+	case 8: // Custom Emote
+		if(pPlayer->m_HasCustomEmote)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own Custom Emote!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 25)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 25 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 25;
+		pPlayer->m_HasCustomEmote = true;
+		pPlayer->m_CustomEmoteEnabled = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Custom Emote! Use /effects to toggle.");
+		break;
+
+	case 9: // Gravity Control
+		if(pPlayer->m_HasGravityControl)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own Gravity Control!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 55)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 55 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 55;
+		pPlayer->m_HasGravityControl = true;
+		pPlayer->m_GravityControlEnabled = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Gravity Control! Use /effects to toggle.");
+		break;
+
+	case 10: // Grenade Launcher
+		if(pPlayer->m_HasGrenadeLauncher)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own Grenade Launcher!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 20)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 20 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 20;
+		pPlayer->m_HasGrenadeLauncher = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Grenade Launcher!");
+		break;
+
+	case 11: // Laser Gun
+		if(pPlayer->m_HasLaserGun)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own Laser Gun!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 20)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 20 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 20;
+		pPlayer->m_HasLaserGun = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Laser Gun!");
+		break;
+
+	case 12: // Invincibility
+		if(pPlayer->m_HasInvincibility)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own Invincibility!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 80)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 80 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 80;
+		pPlayer->m_HasInvincibility = true;
+		pPlayer->m_InvincibilityEnabled = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Invincibility! Use /effects to toggle.");
+		break;
+
+	default:
+		pSelf->SendChatTarget(ClientId, "⚠ Invalid item! Use /shop to see available items.");
+		return;
+	}
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "Remaining coins: %d", pPlayer->m_ShopCoins);
+	pSelf->SendChatTarget(ClientId, aBuf);
+}
+
+void CGameContext::ConAccessories(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+	pSelf->SendChatTarget(ClientId, "★ YOUR ACCESSORIES ★");
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+
+	char aBuf[128];
+	if(pPlayer->m_HasRainbow)
+		str_format(aBuf, sizeof(aBuf), "Rainbow Effect: OWNED %s", pPlayer->m_RainbowEnabled ? "[ON]" : "[OFF]");
+	else
+		str_copy(aBuf, "Rainbow Effect: Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	if(pPlayer->m_HasSpawnEffect)
+		str_format(aBuf, sizeof(aBuf), "Spawn Effect: OWNED %s", pPlayer->m_SpawnEffectEnabled ? "[ON]" : "[OFF]");
+	else
+		str_copy(aBuf, "Spawn Effect: Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	if(pPlayer->m_HasSpeedBoost)
+		str_format(aBuf, sizeof(aBuf), "Speed Boost: OWNED %s", pPlayer->m_SpeedBoostEnabled ? "[ON]" : "[OFF]");
+	else
+		str_copy(aBuf, "Speed Boost: Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Infinite Jump: %s",
+		pPlayer->m_HasInfiniteJumpAccess ? "OWNED" : "Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Protective Aura: %s",
+		pPlayer->m_HasProtectiveAura ? "OWNED" : "Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	if(pPlayer->m_HasEndlessHook)
+		str_format(aBuf, sizeof(aBuf), "Endless Hook: OWNED %s", pPlayer->m_EndlessHookEnabled ? "[ON]" : "[OFF]");
+	else
+		str_copy(aBuf, "Endless Hook: Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	if(pPlayer->m_HasSuperTee)
+		str_format(aBuf, sizeof(aBuf), "Super Tee: OWNED %s", pPlayer->m_SuperTeeEnabled ? "[ON]" : "[OFF]");
+	else
+		str_copy(aBuf, "Super Tee: Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	if(pPlayer->m_HasCustomEmote)
+		str_format(aBuf, sizeof(aBuf), "Custom Emote: OWNED %s", pPlayer->m_CustomEmoteEnabled ? "[ON]" : "[OFF]");
+	else
+		str_copy(aBuf, "Custom Emote: Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	if(pPlayer->m_HasGravityControl)
+		str_format(aBuf, sizeof(aBuf), "Gravity Control: OWNED %s", pPlayer->m_GravityControlEnabled ? "[ON]" : "[OFF]");
+	else
+		str_copy(aBuf, "Gravity Control: Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Grenade Launcher: %s",
+		pPlayer->m_HasGrenadeLauncher ? "OWNED" : "Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Laser Gun: %s",
+		pPlayer->m_HasLaserGun ? "OWNED" : "Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	if(pPlayer->m_HasInvincibility)
+		str_format(aBuf, sizeof(aBuf), "Invincibility: OWNED %s", pPlayer->m_InvincibilityEnabled ? "[ON]" : "[OFF]");
+	else
+		str_copy(aBuf, "Invincibility: Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Coins: %d", pPlayer->m_ShopCoins);
+	pSelf->SendChatTarget(ClientId, aBuf);
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+}
+
+void CGameContext::ConEffects(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	if(pResult->NumArguments() == 0)
+	{
+		pSelf->SendChatTarget(ClientId, "══════════════════════════");
+		pSelf->SendChatTarget(ClientId, "★ EFFECTS TOGGLE ★");
+		pSelf->SendChatTarget(ClientId, "══════════════════════════");
+		pSelf->SendChatTarget(ClientId, "Usage: /effects <name>");
+		pSelf->SendChatTarget(ClientId, "Available effects:");
+		pSelf->SendChatTarget(ClientId, "  rainbow  - Toggle rainbow effect");
+		pSelf->SendChatTarget(ClientId, "  spawn    - Toggle spawn effect");
+		pSelf->SendChatTarget(ClientId, "  speed    - Toggle speed boost");
+		pSelf->SendChatTarget(ClientId, "  hook     - Toggle endless hook");
+		pSelf->SendChatTarget(ClientId, "  super    - Toggle super tee");
+		pSelf->SendChatTarget(ClientId, "  emote    - Toggle custom emote");
+		pSelf->SendChatTarget(ClientId, "  gravity  - Toggle low gravity");
+		pSelf->SendChatTarget(ClientId, "  invincible - Toggle invincibility");
+		pSelf->SendChatTarget(ClientId, "══════════════════════════");
+		return;
+	}
+
+	const char *pEffect = pResult->GetString(0);
+
+	if(str_comp_nocase(pEffect, "rainbow") == 0)
+	{
+		if(!pPlayer->m_HasRainbow)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You don't own the Rainbow Effect! Use /shop to buy it.");
+			return;
+		}
+		pPlayer->m_RainbowEnabled = !pPlayer->m_RainbowEnabled;
+		pSelf->SendChatTarget(ClientId, pPlayer->m_RainbowEnabled ? "★ Rainbow Effect enabled!" : "★ Rainbow Effect disabled!");
+	}
+	else if(str_comp_nocase(pEffect, "spawn") == 0)
+	{
+		if(!pPlayer->m_HasSpawnEffect)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You don't own the Spawn Effect! Use /shop to buy it.");
+			return;
+		}
+		pPlayer->m_SpawnEffectEnabled = !pPlayer->m_SpawnEffectEnabled;
+		pSelf->SendChatTarget(ClientId, pPlayer->m_SpawnEffectEnabled ? "★ Spawn Effect enabled!" : "★ Spawn Effect disabled!");
+	}
+	else if(str_comp_nocase(pEffect, "speed") == 0)
+	{
+		if(!pPlayer->m_HasSpeedBoost)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You don't own the Speed Boost! Use /shop to buy it.");
+			return;
+		}
+		pPlayer->m_SpeedBoostEnabled = !pPlayer->m_SpeedBoostEnabled;
+		pSelf->SendChatTarget(ClientId, pPlayer->m_SpeedBoostEnabled ? "★ Speed Boost enabled!" : "★ Speed Boost disabled!");
+	}
+	else if(str_comp_nocase(pEffect, "hook") == 0)
+	{
+		if(!pPlayer->m_HasEndlessHook)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You don't own Endless Hook! Use /shop to buy it.");
+			return;
+		}
+		pPlayer->m_EndlessHookEnabled = !pPlayer->m_EndlessHookEnabled;
+		pSelf->SendChatTarget(ClientId, pPlayer->m_EndlessHookEnabled ? "★ Endless Hook enabled!" : "★ Endless Hook disabled!");
+	}
+	else if(str_comp_nocase(pEffect, "super") == 0)
+	{
+		if(!pPlayer->m_HasSuperTee)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You don't own Super Tee! Use /shop to buy it.");
+			return;
+		}
+		pPlayer->m_SuperTeeEnabled = !pPlayer->m_SuperTeeEnabled;
+		pSelf->SendChatTarget(ClientId, pPlayer->m_SuperTeeEnabled ? "★ Super Tee enabled!" : "★ Super Tee disabled!");
+	}
+	else if(str_comp_nocase(pEffect, "emote") == 0)
+	{
+		if(!pPlayer->m_HasCustomEmote)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You don't own Custom Emote! Use /shop to buy it.");
+			return;
+		}
+		pPlayer->m_CustomEmoteEnabled = !pPlayer->m_CustomEmoteEnabled;
+		pSelf->SendChatTarget(ClientId, pPlayer->m_CustomEmoteEnabled ? "★ Custom Emote enabled!" : "★ Custom Emote disabled!");
+	}
+	else if(str_comp_nocase(pEffect, "gravity") == 0)
+	{
+		if(!pPlayer->m_HasGravityControl)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You don't own Gravity Control! Use /shop to buy it.");
+			return;
+		}
+		pPlayer->m_GravityControlEnabled = !pPlayer->m_GravityControlEnabled;
+		pSelf->SendChatTarget(ClientId, pPlayer->m_GravityControlEnabled ? "★ Low Gravity enabled!" : "★ Low Gravity disabled!");
+	}
+	else if(str_comp_nocase(pEffect, "invincible") == 0)
+	{
+		if(!pPlayer->m_HasInvincibility)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You don't own Invincibility! Use /shop to buy it.");
+			return;
+		}
+		pPlayer->m_InvincibilityEnabled = !pPlayer->m_InvincibilityEnabled;
+		pSelf->SendChatTarget(ClientId, pPlayer->m_InvincibilityEnabled ? "★ Invincibility enabled!" : "★ Invincibility disabled!");
+	}
+	else
+	{
+		pSelf->SendChatTarget(ClientId, "⚠ Unknown effect! Use /effects to see available effects.");
+	}
+}
+
+void CGameContext::ConCoins(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "★ Your coins: %d", pPlayer->m_ShopCoins);
+	pSelf->SendChatTarget(ClientId, aBuf);
+}
+
+void CGameContext::SendDecoratedBroadcast(const char *pText, int ClientId)
+{
+	char aDecoratedBuf[1024];
+	str_format(aDecoratedBuf, sizeof(aDecoratedBuf),
+		"════════════════════\n"
+		"%s\n"
+		"════════════════════",
+		pText);
+	SendBroadcast(aDecoratedBuf, ClientId);
+}
+
 void CGameContext::ConSay(IConsole::IResult *pResult, void *pUserData)
 {
 	CGameContext *pSelf = (CGameContext *)pUserData;
@@ -3913,6 +5008,26 @@ void CGameContext::OnConsoleInit()
 	Console()->Register("dump_antibot", "", CFGFLAG_SERVER | CFGFLAG_STORE, ConDumpAntibot, this, "Dumps the antibot status");
 	Console()->Register("antibot", "r[command]", CFGFLAG_SERVER | CFGFLAG_STORE, ConAntibot, this, "Sends a command to the antibot");
 
+	// Enhanced admin commands
+	Console()->Register("server_announcement", "r[message]", CFGFLAG_SERVER, ConServerAnnouncement, this, "Send a decorated announcement to all players (broadcast + chat)");
+	Console()->Register("warn_player", "v[id] ?r[reason]", CFGFLAG_SERVER, ConWarnPlayer, this, "Send a warning message to a specific player");
+	Console()->Register("player_stats", "v[id]", CFGFLAG_SERVER, ConPlayerStats, this, "Show detailed stats for a player");
+	Console()->Register("force_spectate", "v[id]", CFGFLAG_SERVER, ConForceSpectate, this, "Force a player into spectator mode");
+	Console()->Register("server_status", "", CFGFLAG_SERVER, ConServerStatus, this, "Show current server status (players, uptime, map)");
+	Console()->Register("exec_on_player", "v[id] r[command]", CFGFLAG_SERVER, ConExecOnPlayer, this, "Execute a chat command on behalf of a player (admin auth, player context)");
+	Console()->Register("freeze_all", "", CFGFLAG_SERVER, ConFreezeAll, this, "Freeze all players on the server");
+	Console()->Register("unfreeze_all", "", CFGFLAG_SERVER, ConUnFreezeAll, this, "Unfreeze all players on the server");
+	Console()->Register("broadcast_player", "v[id] r[message]", CFGFLAG_SERVER, ConBroadcastPlayer, this, "Send a broadcast message to a specific player");
+	Console()->Register("give_coins", "v[id] i[amount]", CFGFLAG_SERVER, ConGiveCoins, this, "Give coins to a player");
+	Console()->Register("set_coins", "v[id] i[amount]", CFGFLAG_SERVER, ConSetCoins, this, "Set a player's coin balance");
+	Console()->Register("kill_all", "", CFGFLAG_SERVER, ConKillAll, this, "Kill all players on the server");
+	Console()->Register("super_all", "", CFGFLAG_SERVER, ConSuperAll, this, "Make all players super");
+	Console()->Register("unsuper_all", "", CFGFLAG_SERVER, ConUnSuperAll, this, "Remove super from all players");
+	Console()->Register("teleport_player", "v[id] i[target-id]", CFGFLAG_SERVER, ConTeleportPlayer, this, "Teleport a player to another player");
+	Console()->Register("slap_player", "v[id] ?i[power]", CFGFLAG_SERVER, ConSlapPlayer, this, "Slap a player (push them up)");
+	Console()->Register("heal_player", "v[id]", CFGFLAG_SERVER, ConHealPlayer, this, "Unfreeze a player (remove freeze and deep freeze)");
+	Console()->Register("swap_players", "v[id] i[id2]", CFGFLAG_SERVER, ConSwapPlayers, this, "Swap positions of two players");
+
 	Console()->Chain("sv_motd", ConchainSpecialMotdupdate, this);
 
 	Console()->Chain("sv_vote_kick", ConchainSettingUpdate, this);
@@ -4105,6 +5220,14 @@ void CGameContext::RegisterChatCommands()
 	Console()->Register("hitothers", "?s['all'|'hammer'|'shotgun'|'grenade'|'laser']", CFGFLAG_CHAT | CMDFLAG_PRACTICE, ConPracticeToggleHitOthers, this, "Toggles hit others");
 
 	Console()->Register("kill", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConProtectedKill, this, "Kill yourself when kill-protected during a long game (use f1, kill for regular kill)");
+
+	// Shop & Accessories chat commands
+	Console()->Register("shop", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConShop, this, "Open the accessory shop");
+	Console()->Register("buy", "i[item-id]", CFGFLAG_CHAT | CFGFLAG_SERVER, ConBuy, this, "Buy an item from the shop (use /shop to see items)");
+	Console()->Register("accessories", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConAccessories, this, "View your owned accessories and their status");
+	Console()->Register("effects", "?s[effect name]", CFGFLAG_CHAT | CFGFLAG_SERVER, ConEffects, this, "Toggle effects on/off (rainbow, spawn, speed)");
+	Console()->Register("coins", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConCoins, this, "Check your coin balance");
+	Console()->Register("gift", "s[player name] i[amount]", CFGFLAG_CHAT | CFGFLAG_SERVER, ConGift, this, "Gift coins to another player");
 }
 
 void CGameContext::OnInit(const void *pPersistentData)
