@@ -87,3 +87,58 @@ jobs:
         with:
           name: ddnet-server-${{ matrix.name }}
           path: build/artifacts/
+
+  build-server-aarch64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: uraimo/run-on-arch-action@v2
+        name: Build server for aarch64
+        id: build
+        with:
+          arch: aarch64
+          distro: ubuntu22.04
+          githubToken: ${{ github.token }}
+          setup: mkdir -p "${PWD}/artifacts"
+          dockerRunArgs: --volume "${PWD}/artifacts:/artifacts"
+          install: |
+            apt-get update -y
+            apt-get install -y \
+              build-essential \
+              cmake \
+              git \
+              pkg-config \
+              libsqlite3-dev \
+              libcurl4-openssl-dev \
+              libssl-dev \
+              libfreetype6-dev \
+              libpng-dev \
+              python3
+          run: |
+            mkdir build
+            cd build
+            cmake \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DSERVER=ON \
+              -DCLIENT=OFF \
+              -DTOOLS=OFF \
+              -DVIDEORECORDER=OFF \
+              -DVULKAN=OFF \
+              ..
+            cmake --build . --config Release -j$(nproc)
+            if [ ! -f DDNet-Server ]; then
+              echo "Error: DDNet-Server binary not found"
+              exit 1
+            fi
+            ./DDNet-Server shutdown
+            tar -cJf /artifacts/ddnet-server-aarch64.tar.xz DDNet-Server
+            ls -la /artifacts/
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ddnet-server-linux-aarch64
+          path: artifacts/
