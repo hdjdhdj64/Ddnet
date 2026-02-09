@@ -32,22 +32,6 @@ jobs:
             cmake-init-env: CXXFLAGS=-Werror
             package-file: "*-linux_x86_64.tar.xz"
 
-          - name: linux-aarch64
-            os: ubuntu-latest
-            arch: aarch64
-            cmake-args: -G Ninja -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/aarch64-linux-gnu.cmake
-            cmake-init-env: CXXFLAGS=-Werror
-            package-file: "*-linux_aarch64.tar.xz"
-            cross: true
-
-          - name: linux-armv7
-            os: ubuntu-latest
-            arch: armv7
-            cmake-args: -G Ninja -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/arm-linux-gnueabihf.cmake
-            cmake-init-env: CXXFLAGS=-Werror
-            package-file: "*-linux_armv7.tar.xz"
-            cross: true
-
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,27 +46,8 @@ jobs:
             libsqlite3-dev \
             libcurl4-openssl-dev \
             libssl-dev \
-            libfreetype6-dev
-
-      - name: Prepare cross-compilation (aarch64)
-        if: matrix.arch == 'aarch64'
-        run: |
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            crossbuild-essential-arm64
-
-      - name: Prepare cross-compilation (armv7)
-        if: matrix.arch == 'armv7'
-        run: |
-          sudo dpkg --add-architecture armhf
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            gcc-arm-linux-gnueabihf \
-            g++-arm-linux-gnueabihf \
-            crossbuild-essential-armhf
+            libfreetype6-dev \
+            libpng-dev
 
       - name: Build server in release mode
         run: |
@@ -101,7 +66,6 @@ jobs:
           cmake --build . --config Release -j$(nproc)
 
       - name: Test server startup
-        if: ${{ !matrix.cross }}
         run: |
           cd build
           ./DDNet-Server shutdown
