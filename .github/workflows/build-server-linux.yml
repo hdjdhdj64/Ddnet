@@ -111,6 +111,7 @@ jobs:
               cmake \
               git \
               pkg-config \
+              cargo \
               libsqlite3-dev \
               libcurl4-openssl-dev \
               libssl-dev \
