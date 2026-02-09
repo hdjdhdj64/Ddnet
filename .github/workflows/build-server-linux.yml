@@ -129,7 +129,7 @@ jobs:
               -DVIDEORECORDER=OFF \
               -DVULKAN=OFF \
               ..
-            cmake --build . --config Release -j$(nproc)
+            cmake --build . --config Release -j2
             if [ ! -f DDNet-Server ]; then
               echo "Error: DDNet-Server binary not found"
               exit 1
