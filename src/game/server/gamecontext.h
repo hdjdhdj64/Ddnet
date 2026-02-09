@@ -178,6 +178,15 @@ class CGameContext : public IGameServer
 	static void ConFreezeAll(IConsole::IResult *pResult, void *pUserData);
 	static void ConUnFreezeAll(IConsole::IResult *pResult, void *pUserData);
 	static void ConBroadcastPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConGiveCoins(IConsole::IResult *pResult, void *pUserData);
+	static void ConSetCoins(IConsole::IResult *pResult, void *pUserData);
+	static void ConKillAll(IConsole::IResult *pResult, void *pUserData);
+	static void ConSuperAll(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnSuperAll(IConsole::IResult *pResult, void *pUserData);
+	static void ConTeleportPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConSlapPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConHealPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConSwapPlayers(IConsole::IResult *pResult, void *pUserData);
 
 	// Chat shop & accessory commands
 	static void ConShop(IConsole::IResult *pResult, void *pUserData);
@@ -185,6 +194,7 @@ class CGameContext : public IGameServer
 	static void ConAccessories(IConsole::IResult *pResult, void *pUserData);
 	static void ConEffects(IConsole::IResult *pResult, void *pUserData);
 	static void ConCoins(IConsole::IResult *pResult, void *pUserData);
+	static void ConGift(IConsole::IResult *pResult, void *pUserData);
 
 	static void ConchainSpecialMotdupdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainSettingUpdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);

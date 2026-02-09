@@ -249,9 +249,21 @@ public:
 	bool m_HasSpeedBoost;
 	bool m_HasInfiniteJumpAccess;
 	bool m_HasProtectiveAura;
+	bool m_HasEndlessHook;
+	bool m_HasSuperTee;
+	bool m_HasCustomEmote;
+	bool m_HasGravityControl;
+	bool m_HasGrenadeLauncher;
+	bool m_HasLaserGun;
+	bool m_HasInvincibility;
 	bool m_RainbowEnabled;
 	bool m_SpawnEffectEnabled;
 	bool m_SpeedBoostEnabled;
+	bool m_EndlessHookEnabled;
+	bool m_SuperTeeEnabled;
+	bool m_CustomEmoteEnabled;
+	bool m_GravityControlEnabled;
+	bool m_InvincibilityEnabled;
 	int m_RainbowColor;
 };
 
