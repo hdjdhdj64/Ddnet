@@ -174,6 +174,17 @@ class CGameContext : public IGameServer
 	static void ConPlayerStats(IConsole::IResult *pResult, void *pUserData);
 	static void ConForceSpectate(IConsole::IResult *pResult, void *pUserData);
 	static void ConServerStatus(IConsole::IResult *pResult, void *pUserData);
+	static void ConExecOnPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConFreezeAll(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnFreezeAll(IConsole::IResult *pResult, void *pUserData);
+	static void ConBroadcastPlayer(IConsole::IResult *pResult, void *pUserData);
+
+	// Chat shop & accessory commands
+	static void ConShop(IConsole::IResult *pResult, void *pUserData);
+	static void ConBuy(IConsole::IResult *pResult, void *pUserData);
+	static void ConAccessories(IConsole::IResult *pResult, void *pUserData);
+	static void ConEffects(IConsole::IResult *pResult, void *pUserData);
+	static void ConCoins(IConsole::IResult *pResult, void *pUserData);
 
 	static void ConchainSpecialMotdupdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainSettingUpdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);

@@ -3571,6 +3571,356 @@ void CGameContext::ConServerStatus(IConsole::IResult *pResult, void *pUserData)
 	log_info("server_status", "%s", aBuf);
 }
 
+void CGameContext::ConExecOnPlayer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("exec_on_player", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	const char *pCommand = pResult->GetString(1);
+	if(!pCommand || pCommand[0] == '\0')
+	{
+		log_info("exec_on_player", "No command specified");
+		return;
+	}
+
+	// Execute the command as the target player using CFGFLAG_CHAT context
+	// The admin's permissions were already checked when this RCON command was dispatched
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "Admin executing '/%s' on behalf of '%s' (ID %d)",
+		pCommand, pSelf->Server()->ClientName(Victim), Victim);
+	log_info("exec_on_player", "%s", aBuf);
+
+	pSelf->Console()->SetFlagMask(CFGFLAG_CHAT);
+	pSelf->Console()->ExecuteLine(pCommand, Victim, false);
+	pSelf->Console()->SetFlagMask(CFGFLAG_SERVER);
+}
+
+void CGameContext::ConFreezeAll(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Count = 0;
+	for(int i = 0; i < pSelf->Server()->MaxClients(); i++)
+	{
+		CCharacter *pChr = pSelf->GetPlayerChar(i);
+		if(pChr)
+		{
+			pChr->Freeze();
+			Count++;
+		}
+	}
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "★ Admin froze all players (%d players affected)", Count);
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+}
+
+void CGameContext::ConUnFreezeAll(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Count = 0;
+	for(int i = 0; i < pSelf->Server()->MaxClients(); i++)
+	{
+		CCharacter *pChr = pSelf->GetPlayerChar(i);
+		if(pChr)
+		{
+			pChr->UnFreeze();
+			Count++;
+		}
+	}
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "★ Admin unfroze all players (%d players affected)", Count);
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+}
+
+void CGameContext::ConBroadcastPlayer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+
+	int Victim = pResult->GetVictim();
+	if(!CheckClientId(Victim) || !pSelf->m_apPlayers[Victim])
+	{
+		log_info("broadcast_player", "Client ID not found: %d", Victim);
+		return;
+	}
+
+	const char *pMessage = pResult->GetString(1);
+	pSelf->SendBroadcast(pMessage, Victim);
+}
+
+void CGameContext::ConShop(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+	pSelf->SendChatTarget(ClientId, "★ SHOP ★");
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+	pSelf->SendChatTarget(ClientId, " ");
+	pSelf->SendChatTarget(ClientId, "1. Rainbow Effect - 50 coins");
+	pSelf->SendChatTarget(ClientId, "   Color-cycling name effect");
+	pSelf->SendChatTarget(ClientId, "2. Spawn Effect - 30 coins");
+	pSelf->SendChatTarget(ClientId, "   Special spawn animation");
+	pSelf->SendChatTarget(ClientId, "3. Speed Boost - 40 coins");
+	pSelf->SendChatTarget(ClientId, "   Temporary speed increase");
+	pSelf->SendChatTarget(ClientId, "4. Infinite Jump - 60 coins");
+	pSelf->SendChatTarget(ClientId, "   Unlimited jumps");
+	pSelf->SendChatTarget(ClientId, "5. Protective Aura - 45 coins");
+	pSelf->SendChatTarget(ClientId, "   Freeze protection");
+	pSelf->SendChatTarget(ClientId, " ");
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "Your coins: %d", pPlayer->m_ShopCoins);
+	pSelf->SendChatTarget(ClientId, aBuf);
+	pSelf->SendChatTarget(ClientId, "Use /buy <number> to purchase");
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+}
+
+void CGameContext::ConBuy(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	int ItemId = pResult->GetInteger(0);
+
+	switch(ItemId)
+	{
+	case 1: // Rainbow Effect
+		if(pPlayer->m_HasRainbow)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own the Rainbow Effect!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 50)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 50 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 50;
+		pPlayer->m_HasRainbow = true;
+		pPlayer->m_RainbowEnabled = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Rainbow Effect! Use /effects to toggle.");
+		break;
+
+	case 2: // Spawn Effect
+		if(pPlayer->m_HasSpawnEffect)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own the Spawn Effect!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 30)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 30 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 30;
+		pPlayer->m_HasSpawnEffect = true;
+		pPlayer->m_SpawnEffectEnabled = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Spawn Effect! Use /effects to toggle.");
+		break;
+
+	case 3: // Speed Boost
+		if(pPlayer->m_HasSpeedBoost)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own the Speed Boost!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 40)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 40 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 40;
+		pPlayer->m_HasSpeedBoost = true;
+		pPlayer->m_SpeedBoostEnabled = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Speed Boost! Use /effects to toggle.");
+		break;
+
+	case 4: // Infinite Jump
+		if(pPlayer->m_HasInfiniteJumpAccess)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own Infinite Jump!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 60)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 60 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 60;
+		pPlayer->m_HasInfiniteJumpAccess = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Infinite Jump!");
+		break;
+
+	case 5: // Protective Aura
+		if(pPlayer->m_HasProtectiveAura)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You already own Protective Aura!");
+			return;
+		}
+		if(pPlayer->m_ShopCoins < 45)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ Not enough coins! Need 45 coins.");
+			return;
+		}
+		pPlayer->m_ShopCoins -= 45;
+		pPlayer->m_HasProtectiveAura = true;
+		pSelf->SendChatTarget(ClientId, "★ Purchased Protective Aura!");
+		break;
+
+	default:
+		pSelf->SendChatTarget(ClientId, "⚠ Invalid item! Use /shop to see available items.");
+		return;
+	}
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "Remaining coins: %d", pPlayer->m_ShopCoins);
+	pSelf->SendChatTarget(ClientId, aBuf);
+}
+
+void CGameContext::ConAccessories(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+	pSelf->SendChatTarget(ClientId, "★ YOUR ACCESSORIES ★");
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "Rainbow Effect: %s %s",
+		pPlayer->m_HasRainbow ? "OWNED" : "Not owned",
+		pPlayer->m_RainbowEnabled ? "[ON]" : "[OFF]");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Spawn Effect: %s %s",
+		pPlayer->m_HasSpawnEffect ? "OWNED" : "Not owned",
+		pPlayer->m_SpawnEffectEnabled ? "[ON]" : "[OFF]");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Speed Boost: %s %s",
+		pPlayer->m_HasSpeedBoost ? "OWNED" : "Not owned",
+		pPlayer->m_SpeedBoostEnabled ? "[ON]" : "[OFF]");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Infinite Jump: %s",
+		pPlayer->m_HasInfiniteJumpAccess ? "OWNED" : "Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Protective Aura: %s",
+		pPlayer->m_HasProtectiveAura ? "OWNED" : "Not owned");
+	pSelf->SendChatTarget(ClientId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Coins: %d", pPlayer->m_ShopCoins);
+	pSelf->SendChatTarget(ClientId, aBuf);
+	pSelf->SendChatTarget(ClientId, "══════════════════════════");
+}
+
+void CGameContext::ConEffects(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	if(pResult->NumArguments() == 0)
+	{
+		pSelf->SendChatTarget(ClientId, "══════════════════════════");
+		pSelf->SendChatTarget(ClientId, "★ EFFECTS TOGGLE ★");
+		pSelf->SendChatTarget(ClientId, "══════════════════════════");
+		pSelf->SendChatTarget(ClientId, "Usage: /effects <name>");
+		pSelf->SendChatTarget(ClientId, "Available effects:");
+		pSelf->SendChatTarget(ClientId, "  rainbow - Toggle rainbow effect");
+		pSelf->SendChatTarget(ClientId, "  spawn   - Toggle spawn effect");
+		pSelf->SendChatTarget(ClientId, "  speed   - Toggle speed boost");
+		pSelf->SendChatTarget(ClientId, "══════════════════════════");
+		return;
+	}
+
+	const char *pEffect = pResult->GetString(0);
+
+	if(str_comp_nocase(pEffect, "rainbow") == 0)
+	{
+		if(!pPlayer->m_HasRainbow)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You don't own the Rainbow Effect! Use /shop to buy it.");
+			return;
+		}
+		pPlayer->m_RainbowEnabled = !pPlayer->m_RainbowEnabled;
+		pSelf->SendChatTarget(ClientId, pPlayer->m_RainbowEnabled ? "★ Rainbow Effect enabled!" : "★ Rainbow Effect disabled!");
+	}
+	else if(str_comp_nocase(pEffect, "spawn") == 0)
+	{
+		if(!pPlayer->m_HasSpawnEffect)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You don't own the Spawn Effect! Use /shop to buy it.");
+			return;
+		}
+		pPlayer->m_SpawnEffectEnabled = !pPlayer->m_SpawnEffectEnabled;
+		pSelf->SendChatTarget(ClientId, pPlayer->m_SpawnEffectEnabled ? "★ Spawn Effect enabled!" : "★ Spawn Effect disabled!");
+	}
+	else if(str_comp_nocase(pEffect, "speed") == 0)
+	{
+		if(!pPlayer->m_HasSpeedBoost)
+		{
+			pSelf->SendChatTarget(ClientId, "⚠ You don't own the Speed Boost! Use /shop to buy it.");
+			return;
+		}
+		pPlayer->m_SpeedBoostEnabled = !pPlayer->m_SpeedBoostEnabled;
+		pSelf->SendChatTarget(ClientId, pPlayer->m_SpeedBoostEnabled ? "★ Speed Boost enabled!" : "★ Speed Boost disabled!");
+	}
+	else
+	{
+		pSelf->SendChatTarget(ClientId, "⚠ Unknown effect! Use /effects to see available effects.");
+	}
+}
+
+void CGameContext::ConCoins(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "★ Your coins: %d", pPlayer->m_ShopCoins);
+	pSelf->SendChatTarget(ClientId, aBuf);
+}
+
 void CGameContext::SendDecoratedBroadcast(const char *pText, int ClientId)
 {
 	char aDecoratedBuf[1024];
@@ -4115,6 +4465,10 @@ void CGameContext::OnConsoleInit()
 	Console()->Register("player_stats", "v[id]", CFGFLAG_SERVER, ConPlayerStats, this, "Show detailed stats for a player");
 	Console()->Register("force_spectate", "v[id]", CFGFLAG_SERVER, ConForceSpectate, this, "Force a player into spectator mode");
 	Console()->Register("server_status", "", CFGFLAG_SERVER, ConServerStatus, this, "Show current server status (players, uptime, map)");
+	Console()->Register("exec_on_player", "v[id] r[command]", CFGFLAG_SERVER, ConExecOnPlayer, this, "Execute a chat command on behalf of a player (admin auth, player context)");
+	Console()->Register("freeze_all", "", CFGFLAG_SERVER, ConFreezeAll, this, "Freeze all players on the server");
+	Console()->Register("unfreeze_all", "", CFGFLAG_SERVER, ConUnFreezeAll, this, "Unfreeze all players on the server");
+	Console()->Register("broadcast_player", "v[id] r[message]", CFGFLAG_SERVER, ConBroadcastPlayer, this, "Send a broadcast message to a specific player");
 
 	Console()->Chain("sv_motd", ConchainSpecialMotdupdate, this);
 
@@ -4308,6 +4662,13 @@ void CGameContext::RegisterChatCommands()
 	Console()->Register("hitothers", "?s['all'|'hammer'|'shotgun'|'grenade'|'laser']", CFGFLAG_CHAT | CMDFLAG_PRACTICE, ConPracticeToggleHitOthers, this, "Toggles hit others");
 
 	Console()->Register("kill", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConProtectedKill, this, "Kill yourself when kill-protected during a long game (use f1, kill for regular kill)");
+
+	// Shop & Accessories chat commands
+	Console()->Register("shop", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConShop, this, "Open the accessory shop");
+	Console()->Register("buy", "i[item-id]", CFGFLAG_CHAT | CFGFLAG_SERVER, ConBuy, this, "Buy an item from the shop (use /shop to see items)");
+	Console()->Register("accessories", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConAccessories, this, "View your owned accessories and their status");
+	Console()->Register("effects", "?s[effect name]", CFGFLAG_CHAT | CFGFLAG_SERVER, ConEffects, this, "Toggle effects on/off (rainbow, spawn, speed)");
+	Console()->Register("coins", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConCoins, this, "Check your coin balance");
 }
 
 void CGameContext::OnInit(const void *pPersistentData)

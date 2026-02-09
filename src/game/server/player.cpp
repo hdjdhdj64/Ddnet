@@ -149,6 +149,18 @@ void CPlayer::Reset()
 	m_RescueMode = RESCUEMODE_AUTO;
 
 	m_CameraInfo.Reset();
+
+	// Shop & Accessories
+	m_ShopCoins = 100;
+	m_HasRainbow = false;
+	m_HasSpawnEffect = false;
+	m_HasSpeedBoost = false;
+	m_HasInfiniteJumpAccess = false;
+	m_HasProtectiveAura = false;
+	m_RainbowEnabled = false;
+	m_SpawnEffectEnabled = false;
+	m_SpeedBoostEnabled = false;
+	m_RainbowColor = 0;
 }
 
 static int PlayerFlags_SixToSeven(int Flags)

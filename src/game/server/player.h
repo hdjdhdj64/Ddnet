@@ -241,6 +241,18 @@ public:
 
 	CSaveTee m_LastTeleTee;
 	std::optional<CSaveTee> m_LastDeath;
+
+	// Shop & Accessories
+	int m_ShopCoins;
+	bool m_HasRainbow;
+	bool m_HasSpawnEffect;
+	bool m_HasSpeedBoost;
+	bool m_HasInfiniteJumpAccess;
+	bool m_HasProtectiveAura;
+	bool m_RainbowEnabled;
+	bool m_SpawnEffectEnabled;
+	bool m_SpeedBoostEnabled;
+	int m_RainbowColor;
 };
 
 #endif
