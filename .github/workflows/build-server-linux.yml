@@ -8,6 +8,9 @@ on:
   merge_group:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-server:
     runs-on: ${{ matrix.os }}
@@ -64,29 +67,22 @@ jobs:
       - name: Prepare cross-compilation (aarch64)
         if: matrix.arch == 'aarch64'
         run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update -y
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
             g++-aarch64-linux-gnu \
-            libsqlite3-dev:arm64 \
-            || true
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update -y || true
-          sudo apt-get install -y \
-            crossbuild-essential-arm64 \
-            || true
+            crossbuild-essential-arm64
 
       - name: Prepare cross-compilation (armv7)
         if: matrix.arch == 'armv7'
         run: |
+          sudo dpkg --add-architecture armhf
+          sudo apt-get update -y
           sudo apt-get install -y \
             gcc-arm-linux-gnueabihf \
             g++-arm-linux-gnueabihf \
-            || true
-          sudo dpkg --add-architecture armhf
-          sudo apt-get update -y || true
-          sudo apt-get install -y \
-            crossbuild-essential-armhf \
-            || true
+            crossbuild-essential-armhf
 
       - name: Build server in release mode
         run: |
@@ -114,11 +110,12 @@ jobs:
         run: |
           cd build
           mkdir -p artifacts
-          tar -cJf artifacts/ddnet-server-${{ matrix.arch }}.tar.xz \
-            DDNet-Server \
-            || tar -cJf artifacts/ddnet-server-${{ matrix.arch }}.tar.xz \
-            DDNet-Server* \
-            || echo "Packaging individual files"
+          if [ -f DDNet-Server ]; then
+            tar -cJf artifacts/ddnet-server-${{ matrix.arch }}.tar.xz DDNet-Server
+          else
+            echo "Error: DDNet-Server binary not found"
+            exit 1
+          fi
           ls -la artifacts/
 
       - name: Upload Artifacts
